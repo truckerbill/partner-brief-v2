@@ -14,6 +14,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Debug repo contents
+        run: |
+          echo "PWD:"
+          pwd
+          echo "Top level:"
+          ls -la
+          echo "v2 folder:"
+          ls -la "v2 (perplexity + make)" || true
+          echo "Find build_brief.py:"
+          find . -maxdepth 5 -name "build_brief.py" -print
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
