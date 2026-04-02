@@ -8,6 +8,7 @@ import os
 import re
 import sys
 import time
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from typing import Any, Optional
@@ -64,17 +65,27 @@ def build_prompt(partner: str) -> str:
         "You are preparing an executive partner brief.\n\n"
         f"Partner: {partner}\n"
         "Time window: last 7 days only\n"
-        "Geography: Europe and the US\n"
-        "Scope: major news, leadership changes, product launches, M&A/funding, major partnerships\n\n"
+        "Geography: Europe, North America, Latin America (LATAM), APJ (Asia Pacific Japan)\n"
+        "Scope: partner-focused business updates (see categories)\n\n"
         "Return EXACTLY this format:\n"
         f"Partner: {partner}\n"
         "- [Category] (Region, YYYY-MM-DD) Bullet summary. Source: <url>\n"
         "- ... (3–8 bullets max)\n\n"
-        "Category must be one of: LeadershipChange | ProductLaunch | FundingOrMA | MajorNews | Other\n"
-        "Region must be one of: EU | US | Global | Unknown\n\n"
+        "Category must be one of:\n"
+        "- NewJoiners (ONLY for Account Executives and CSMs/CSPs)\n"
+        "- Acquisitions\n"
+        "- ProductNews\n"
+        "- FinancialNews\n"
+        "- StrategyUpdates\n"
+        "- PartnershipUpdates\n"
+        "- NewClientWins\n"
+        "- Other\n\n"
+        "Region must be one of: Europe | North America | LATAM | APJ | Global | Unknown\n\n"
+        "ProductNews focus areas (call out explicitly when relevant): career site features, career site builder, screening, scheduling, employee referrals, candidate relationship management (CRM).\n\n"
         "Rules:\n"
         "- Only include items clearly within the last 7 days; if unsure, exclude.\n"
         "- Prefer primary sources (company newsroom/blog) or credible outlets.\n"
+        "- If you mention a new hire, ONLY include if the role is Account Executive or CSM/CSP.\n"
         "- If nothing found, return:\n"
         f"Partner: {partner}\n"
         "- No significant updates found in the last 7 days.\n"
@@ -185,60 +196,118 @@ def _esc(s: str) -> str:
     return html.escape(s or "", quote=True)
 
 
+def _extract_domain(url: str) -> str:
+    try:
+        return urllib.parse.urlparse(url).netloc.lower()
+    except Exception:
+        return ""
+
+
 def render_html(briefs: list[PartnerBrief], *, title: str) -> str:
     now = _utc_now()
     period_end = now.date().isoformat()
     period_start = (now.date() - dt.timedelta(days=7)).isoformat()
 
-    sections: list[str] = []
-    for b in briefs:
-        lis: list[str] = []
-        for blt in b.bullets:
-            meta = []
-            if blt.category:
-                meta.append(_esc(blt.category))
-            if blt.region:
-                meta.append(_esc(blt.region))
-            if blt.date:
-                meta.append(_esc(blt.date))
-            meta_s = " · ".join(meta)
-            if blt.source_url:
-                li = (
-                    f"<li style=\"margin:6px 0;\">"
-                    f"<div style=\"color:#111827;\">{_esc(blt.summary)}</div>"
-                    f"<div style=\"color:#6b7280;font-size:12px;\">{meta_s} · "
-                    f"<a href=\"{_esc(blt.source_url)}\" target=\"_blank\" rel=\"noopener noreferrer\">source</a>"
-                    f"</div>"
-                    f"</li>"
-                )
-            else:
-                li = (
-                    f"<li style=\"margin:6px 0;\">"
-                    f"<div style=\"color:#111827;\">{_esc(blt.summary)}</div>"
-                    f"<div style=\"color:#6b7280;font-size:12px;\">{meta_s}</div>"
-                    f"</li>"
-                )
-            lis.append(li)
+    briefs_sorted = sorted(briefs, key=lambda x: x.partner.lower())
 
-        citations_html = ""
-        if b.citations:
-            c = "".join(
-                f"<li style=\"margin:4px 0;\"><a href=\"{_esc(u)}\" target=\"_blank\" rel=\"noopener noreferrer\">{_esc(u)}</a></li>"
-                for u in b.citations[:10]
+    # Top highlights = first 3 bullets per partner (excluding "No significant updates..." filler)
+    top_blocks: list[str] = []
+    for b in briefs_sorted:
+        bullets = [bl for bl in b.bullets if "No significant updates found" not in (bl.summary or "")]
+        top = bullets[:3]
+        if not top:
+            top_blocks.append(
+                f"<div class=\"highlight-card\">"
+                f"<div class=\"partner\">{_esc(b.partner)}</div>"
+                f"<div class=\"muted\">No significant updates found in the last 7 days.</div>"
+                f"</div>"
             )
-            citations_html = (
-                "<details style=\"margin-top:10px;\">"
-                "<summary style=\"cursor:pointer;color:#374151;font-size:12px;\">Citations</summary>"
-                f"<ul style=\"margin:8px 0 0 18px;padding:0;color:#374151;font-size:12px;\">{c}</ul>"
-                "</details>"
+            continue
+
+        lis = "".join(
+            (
+                "<li>"
+                f"<span class=\"pill\">{_esc(bl.category or 'Other')}</span>"
+                f"<span class=\"pill pill-quiet\">{_esc(bl.region or 'Unknown')}</span>"
+                f"<span class=\"pill pill-quiet\">{_esc(bl.date or '')}</span>"
+                + (
+                    f"<a class=\"item\" href=\"{_esc(bl.source_url)}\" target=\"_blank\" rel=\"noopener noreferrer\">{_esc(bl.summary)}</a>"
+                    if bl.source_url
+                    else f"<span class=\"item\">{_esc(bl.summary)}</span>"
+                )
+                + "</li>"
+            )
+            for bl in top
+        )
+        top_blocks.append(
+            f"<div class=\"highlight-card\">"
+            f"<div class=\"partner\">{_esc(b.partner)}</div>"
+            f"<ul class=\"highlights\">{lis}</ul>"
+            f"</div>"
+        )
+
+    # Full table rows
+    rows: list[str] = []
+    for b in briefs_sorted:
+        if not b.bullets:
+            rows.append(
+                "<tr>"
+                f"<td>{_esc(b.partner)}</td>"
+                "<td colspan=\"4\" class=\"muted\">No updates.</td>"
+                "</tr>"
+            )
+            continue
+
+        for bl in b.bullets:
+            if "No significant updates found" in (bl.summary or "") and not bl.source_url:
+                rows.append(
+                    "<tr>"
+                    f"<td>{_esc(b.partner)}</td>"
+                    f"<td>{_esc(bl.category or 'Other')}</td>"
+                    f"<td>{_esc(bl.region or 'Unknown')}</td>"
+                    f"<td>{_esc(bl.date or '')}</td>"
+                    f"<td colspan=\"2\" class=\"muted\">{_esc(bl.summary)}</td>"
+                    "</tr>"
+                )
+                continue
+
+            item_html = (
+                f"<a href=\"{_esc(bl.source_url)}\" target=\"_blank\" rel=\"noopener noreferrer\">{_esc(bl.summary)}</a>"
+                if bl.source_url
+                else _esc(bl.summary)
+            )
+            source_html = _esc(_extract_domain(bl.source_url)) if bl.source_url else ""
+            rows.append(
+                "<tr>"
+                f"<td>{_esc(b.partner)}</td>"
+                f"<td>{_esc(bl.category or 'Other')}</td>"
+                f"<td>{_esc(bl.region or 'Unknown')}</td>"
+                f"<td class=\"mono\">{_esc(bl.date or '')}</td>"
+                f"<td>{item_html}</td>"
+                f"<td class=\"muted\">{source_html}</td>"
+                "</tr>"
             )
 
-        sections.append(
-            f"<section style=\"margin:18px 0;padding:14px 14px 10px;border:1px solid #e5e7eb;border-radius:12px;\">"
-            f"<h2 style=\"margin:0 0 8px;font-size:16px;color:#111827;\">{_esc(b.partner)}</h2>"
-            f"<ul style=\"margin:0 0 0 18px;padding:0;color:#111827;font-size:13px;line-height:1.4;\">{''.join(lis) if lis else '<li>No updates.</li>'}</ul>"
-            f"{citations_html}"
-            "</section>"
+    rows_html = "\n".join(rows) if rows else "<tr><td colspan=\"6\" class=\"muted\">No partners configured.</td></tr>"
+
+    # Citations per partner (only if partner has real updates)
+    citations_sections: list[str] = []
+    for b in briefs_sorted:
+        has_real_updates = any(
+            (bl.source_url or "").strip() and "No significant updates found" not in (bl.summary or "")
+            for bl in (b.bullets or [])
+        )
+        if not b.citations or not has_real_updates:
+            continue
+        c = "".join(
+            f"<li><a href=\"{_esc(u)}\" target=\"_blank\" rel=\"noopener noreferrer\">{_esc(u)}</a></li>"
+            for u in b.citations[:15]
+        )
+        citations_sections.append(
+            "<details class=\"citations\">"
+            f"<summary><span class=\"partner\">{_esc(b.partner)}</span> citations</summary>"
+            f"<ul>{c}</ul>"
+            "</details>"
         )
 
     return f"""<!doctype html>
@@ -247,21 +316,86 @@ def render_html(briefs: list[PartnerBrief], *, title: str) -> str:
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{_esc(title)}</title>
+    <style>
+      :root {{
+        --bg: #f6f7fb;
+        --card: #ffffff;
+        --border: #e5e7eb;
+        --text: #111827;
+        --muted: #6b7280;
+        --muted2: #374151;
+        --pill: #eef2ff;
+        --pillText: #3730a3;
+      }}
+      * {{ box-sizing: border-box; }}
+      body {{ margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, Helvetica, sans-serif; }}
+      a {{ color: #111827; text-decoration: underline; text-underline-offset: 2px; }}
+      a:hover {{ color: #1f2937; }}
+      .wrap {{ max-width: 1080px; margin: 0 auto; padding: 24px; }}
+      .panel {{ background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 20px; }}
+      .header {{ display:flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }}
+      .title {{ margin:0; font-size: 20px; line-height: 1.2; }}
+      .range {{ font-size: 12px; color: var(--muted); }}
+      .sub {{ margin: 10px 0 0; font-size: 13px; line-height: 1.5; color: var(--muted2); }}
+      .section-title {{ margin: 18px 0 10px; font-size: 15px; }}
+      .grid {{ display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }}
+      @media (max-width: 900px) {{ .grid {{ grid-template-columns: 1fr; }} }}
+      .highlight-card {{ border:1px solid var(--border); border-radius: 12px; padding: 12px; background:#fff; }}
+      .partner {{ font-weight: 700; }}
+      .muted {{ color: var(--muted); }}
+      .highlights {{ margin: 10px 0 0 18px; padding: 0; font-size: 13px; line-height: 1.45; }}
+      .highlights li {{ margin: 6px 0; }}
+      .pill {{ display:inline-block; padding: 2px 8px; border-radius: 999px; background: var(--pill); color: var(--pillText); font-size: 11px; margin-right: 6px; vertical-align: 1px; }}
+      .pill-quiet {{ background: #f3f4f6; color: #374151; }}
+      .item {{ margin-left: 2px; }}
+      .table-wrap {{ margin-top: 10px; overflow:auto; border: 1px solid var(--border); border-radius: 12px; }}
+      table {{ border-collapse: collapse; width: 100%; min-width: 980px; font-size: 12px; }}
+      thead th {{ position: sticky; top: 0; background: #f3f4f6; color: #111827; text-align:left; padding: 10px; border-bottom: 1px solid var(--border); }}
+      tbody td {{ padding: 10px; border-bottom: 1px solid #f1f5f9; vertical-align: top; }}
+      tbody tr:hover td {{ background: #fafafa; }}
+      .mono {{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; white-space: nowrap; }}
+      details.citations {{ margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }}
+      details.citations summary {{ cursor: pointer; color: var(--muted2); font-size: 12px; }}
+      details.citations ul {{ margin: 8px 0 0 18px; padding: 0; font-size: 12px; color: var(--muted2); }}
+      .footer {{ margin-top: 14px; font-size: 11px; color: var(--muted); }}
+    </style>
   </head>
-  <body style="margin:0;padding:0;background:#f6f7fb;font-family:Arial,Helvetica,sans-serif;">
-    <div style="max-width:980px;margin:0 auto;padding:24px;">
-      <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;padding:20px;">
-        <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;">
-          <h1 style="margin:0;font-size:20px;line-height:1.2;">{_esc(title)}</h1>
-          <div style="color:#6b7280;font-size:12px;">{_esc(period_start)} → {_esc(period_end)} (UTC)</div>
+  <body>
+    <div class="wrap">
+      <div class="panel">
+        <div class="header">
+          <h1 class="title">{_esc(title)}</h1>
+          <div class="range">{_esc(period_start)} → {_esc(period_end)} (UTC)</div>
         </div>
-        <p style="margin:12px 0 0;color:#374151;font-size:13px;line-height:1.4;">
-          Generated from Perplexity Sonar (best-effort; always confirm via sources).
-        </p>
-        {''.join(sections) if sections else '<p style="margin:16px 0 0;color:#6b7280;">No partners configured.</p>'}
-        <p style="margin:16px 0 0;color:#6b7280;font-size:11px;line-height:1.4;">
-          Generated at {_esc(now.strftime('%Y-%m-%d %H:%M UTC'))}.
-        </p>
+        <p class="sub">Weekly partner intelligence generated from Perplexity Sonar (best-effort; always confirm via sources).</p>
+
+        <div class="section-title">Top highlights (per partner)</div>
+        <div class="grid">
+          {''.join(top_blocks)}
+        </div>
+
+        <div class="section-title">All items</div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 180px;">Partner</th>
+                <th style="width: 140px;">Category</th>
+                <th style="width: 90px;">Region</th>
+                <th style="width: 110px;">Date</th>
+                <th>Item</th>
+                <th style="width: 220px;">Source</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows_html}
+            </tbody>
+          </table>
+        </div>
+
+        {''.join(citations_sections) if citations_sections else ''}
+
+        <div class="footer">Generated at {_esc(now.strftime('%Y-%m-%d %H:%M UTC'))}.</div>
       </div>
     </div>
   </body>
@@ -283,7 +417,7 @@ def main(argv: list[str]) -> int:
     recency = _env_opt("PPLX_RECENCY", "week")
     polite_sleep_s = float(_env_opt("PPLX_SLEEP_S", "0.8"))
 
-    title = _env_opt("BRIEF_TITLE", "Executive Partner Brief (v2)")
+    title = _env_opt("BRIEF_TITLE", "Executive Partner Brief")
     out_html_path = _env_opt("BRIEF_OUT", os.path.join(root, "..", "out", "executive_partner_brief_v2.html"))
     debug_json_path = _env_opt("BRIEF_DEBUG_JSON", os.path.join(root, "..", "out", "executive_partner_brief_v2.raw.json"))
 
