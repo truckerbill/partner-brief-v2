@@ -26,7 +26,7 @@ jobs:
           BRIEF_DAYS: "7"
           BRIEF_OUT: ../out/executive_partner_brief.html
           BRIEF_DEBUG_JSON: ../out/executive_partner_brief.items.json
-        run: python scripts/build_brief.py
+        run: python build_brief.py
 
       - name: Send email via Apps Script
         working-directory: v1 (rss)
@@ -36,5 +36,5 @@ jobs:
           BRIEF_SHARED_SECRET: ${{ secrets.BRIEF_SHARED_SECRET }}
           BRIEF_EMAIL_TO: ${{ secrets.BRIEF_EMAIL_TO }}
           BRIEF_EMAIL_SUBJECT: Executive Partner Brief (weekly, v1)
-        run: python scripts/send_brief.py
+        run: python send_brief.py
 
