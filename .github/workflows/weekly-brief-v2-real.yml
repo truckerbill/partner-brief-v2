@@ -28,7 +28,7 @@ jobs:
           BRIEF_TITLE: Executive Partner Brief (v2)
           BRIEF_OUT: ../out/executive_partner_brief_v2.html
           BRIEF_DEBUG_JSON: ../out/executive_partner_brief_v2.raw.json
-        run: python build_brief.py
+        run: python "v2 (perplexity + make)/build_brief.py"
 
       - name: Send email via Apps Script
         env:
@@ -37,4 +37,4 @@ jobs:
           BRIEF_SHARED_SECRET: ${{ secrets.BRIEF_SHARED_SECRET }}
           BRIEF_EMAIL_TO: ${{ secrets.BRIEF_EMAIL_TO }}
           BRIEF_EMAIL_SUBJECT: Executive Partner Brief (weekly, v2)
-        run: python send_brief.py
+        run: python "v2 (perplexity + make)/send_brief.py"
