@@ -1,0 +1,11 @@
+{
+  "model": "sonar",
+  "temperature": 0.2,
+  "messages": [
+    {
+      "role": "user",
+      "content": "You are preparing an executive partner brief.\n\nPartner: {{partnerName}}\nTime window: last 7 days only\nGeography: Europe and the US\nScope: major news, leadership changes, product launches, M&A/funding, major partnerships\n\nReturn EXACTLY this format:\nPartner: {{partnerName}}\n- [Category] (Region, YYYY-MM-DD) Bullet summary. Source: <url>\n- ... (3–8 bullets max)\n\nCategory must be one of: LeadershipChange | ProductLaunch | FundingOrMA | MajorNews | Other\nRegion must be one of: EU | US | Global | Unknown\n\nRules:\n- Only include items clearly within the last 7 days; if unsure, exclude.\n- Prefer primary sources (company newsroom/blog) or credible outlets.\n- If nothing found, return:\nPartner: {{partnerName}}\n- No significant updates found in the last 7 days.\n"
+    }
+  ]
+}
+

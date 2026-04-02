@@ -1,0 +1,22 @@
+You are preparing an executive partner brief.
+
+Partner: {{partnerName}}
+Time window: last 7 days only
+Geography: Europe and the US
+Scope: major news, leadership changes, product launches, M&A/funding, major partnerships
+
+Return EXACTLY this format:
+Partner: {{partnerName}}
+- [Category] (Region, YYYY-MM-DD) Bullet summary. Source: <url>
+- ... (3–8 bullets max)
+
+Category must be one of: LeadershipChange | ProductLaunch | FundingOrMA | MajorNews | Other
+Region must be one of: EU | US | Global | Unknown
+
+Rules:
+- Only include items clearly within the last 7 days; if unsure, exclude.
+- Prefer primary sources (company newsroom/blog) or credible outlets.
+- If nothing found, return:
+Partner: {{partnerName}}
+- No significant updates found in the last 7 days.
+
