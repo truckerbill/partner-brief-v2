@@ -19,7 +19,7 @@ jobs:
         with:
           python-version: "3.11"
 
-       - name: Build brief HTML (Perplexity)
+      - name: Build brief HTML (Perplexity)
         env:
           PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
           PPLX_MODEL: sonar
@@ -30,7 +30,7 @@ jobs:
           BRIEF_DEBUG_JSON: out/executive_partner_brief_v2.raw.json
         run: python build_brief.py
 
-          - name: Send email via Apps Script
+      - name: Send email via Apps Script
         env:
           BRIEF_OUT: out/executive_partner_brief_v2.html
           BRIEF_APPS_SCRIPT_URL: ${{ secrets.BRIEF_APPS_SCRIPT_URL }}
