@@ -8,6 +8,7 @@ import os
 import re
 import sys
 import time
+import hashlib
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -66,11 +67,14 @@ def build_prompt(partner: str) -> str:
         f"Partner: {partner}\n"
         "Time window: last 7 days only\n"
         "Geography: Europe, North America, Latin America (LATAM), APJ (Asia Pacific Japan)\n"
-        "Scope: partner-focused business updates (see categories)\n\n"
+        "Audience: partnership manager\n"
+        "Goal: surface only the most relevant partner/competitive intelligence.\n"
+        "Relevance filter (prefer items that change what we DO): integrations/partner ecosystem moves, pricing/packaging, GTM/strategy shifts, notable wins/losses, acquisitions, material product capabilities in recruiting (career site, screening, scheduling, referrals, CRM), executive hires that affect partner programs.\n"
+        "For competitors, focus on moves that impact positioning vs major HRIS/ATS ecosystems.\n\n"
         "Return EXACTLY this format:\n"
         f"Partner: {partner}\n"
         "- [Category] (Region, YYYY-MM-DD) Bullet summary. Source: <url>\n"
-        "- ... (3–8 bullets max)\n\n"
+        "- ... (3–6 bullets max; order by relevance, most important first)\n\n"
         "Category must be one of:\n"
         "- NewJoiners (ONLY for Account Executives and CSMs/CSPs)\n"
         "- Acquisitions\n"
@@ -82,10 +86,13 @@ def build_prompt(partner: str) -> str:
         "- Other\n\n"
         "Region must be one of: Europe | North America | LATAM | APJ | Global | Unknown\n\n"
         "ProductNews focus areas (call out explicitly when relevant): career site features, career site builder, screening, scheduling, employee referrals, candidate relationship management (CRM).\n\n"
+        "Sources: Prefer company newsroom/blog and credible outlets. Public LinkedIn posts are acceptable when they are primary/official (company page, product announcement, exec/new-hire announcement, customer win post) and include a working URL.\n\n"
         "Rules:\n"
         "- Only include items clearly within the last 7 days; if unsure, exclude.\n"
         "- Prefer primary sources (company newsroom/blog) or credible outlets.\n"
         "- If you mention a new hire, ONLY include if the role is Account Executive or CSM/CSP.\n"
+        "- If the source is unrelated to the partner, exclude it.\n"
+        "- Include NewClientWins when credible (press release, case study, reputable coverage, or official LinkedIn post).\n"
         "- If nothing found, return:\n"
         f"Partner: {partner}\n"
         "- No significant updates found in the last 7 days.\n"
@@ -203,12 +210,75 @@ def _extract_domain(url: str) -> str:
         return ""
 
 
+def _norm_cat(cat: str) -> str:
+    c = (cat or "").strip()
+    if not c:
+        return "Other"
+    low = c.lower().replace(" ", "")
+    mapping = {
+        "newjoiners": "NewJoiners",
+        "newjoiner": "NewJoiners",
+        "leadershipchange": "NewJoiners",
+        "acquisitions": "Acquisitions",
+        "acquisition": "Acquisitions",
+        "fundingorma": "Acquisitions",
+        "productnews": "ProductNews",
+        "productlaunch": "ProductNews",
+        "financialnews": "FinancialNews",
+        "strategyupdates": "StrategyUpdates",
+        "majornews": "StrategyUpdates",
+        "partnershipupdates": "PartnershipUpdates",
+        "partnershipupdate": "PartnershipUpdates",
+        "newclientwins": "NewClientWins",
+        "clientwin": "NewClientWins",
+        "other": "Other",
+    }
+    return mapping.get(low, c if c in mapping.values() else "Other")
+
+
+def _cat_class(cat: str) -> str:
+    return {
+        "NewJoiners": "cat-newjoiners",
+        "Acquisitions": "cat-acquisitions",
+        "ProductNews": "cat-product",
+        "FinancialNews": "cat-financial",
+        "StrategyUpdates": "cat-strategy",
+        "PartnershipUpdates": "cat-partnership",
+        "NewClientWins": "cat-wins",
+        "Other": "cat-other",
+    }.get(cat, "cat-other")
+
+
+_NO_NEWS_JOKES = [
+    "No news this week — either everything’s stable… or everyone’s saving it for next week.",
+    "No updates found — the partner ecosystem is practicing mindfulness.",
+    "No news — which is either great, or a very quiet plot twist.",
+    "Nothing significant this week — the integration gremlins must be on vacation.",
+]
+
+
+def _no_news_joke(partner: str) -> str:
+    h = hashlib.sha256((partner or "").encode("utf-8")).hexdigest()
+    idx = int(h[:8], 16) % len(_NO_NEWS_JOKES)
+    return _NO_NEWS_JOKES[idx]
+
+
 def render_html(briefs: list[PartnerBrief], *, title: str) -> str:
     now = _utc_now()
     period_end = now.date().isoformat()
     period_start = (now.date() - dt.timedelta(days=7)).isoformat()
 
-    briefs_sorted = sorted(briefs, key=lambda x: x.partner.lower())
+    # Order: partners first, then competition.
+    # (Keep this explicit so email reads the way partnership teams think.)
+    preferred = ["SAP SuccessFactors", "SmartRecruiters", "Workday", "iCIMS", "Avature", "Paradox", "Phenom", "Eightfold"]
+    pref_rank = {name.lower(): i for i, name in enumerate(preferred)}
+    briefs_sorted = sorted(
+        briefs,
+        key=lambda x: (
+            pref_rank.get(x.partner.lower(), 999),
+            x.partner.lower(),
+        ),
+    )
 
     # Top highlights = first 3 bullets per partner (excluding "No significant updates..." filler)
     top_blocks: list[str] = []
@@ -220,6 +290,7 @@ def render_html(briefs: list[PartnerBrief], *, title: str) -> str:
                 f"<div class=\"highlight-card\">"
                 f"<div class=\"partner\">{_esc(b.partner)}</div>"
                 f"<div class=\"muted\">No significant updates found in the last 7 days.</div>"
+                f"<div class=\"muted\" style=\"margin-top:6px;\">{_esc(_no_news_joke(b.partner))}</div>"
                 f"</div>"
             )
             continue
@@ -227,7 +298,7 @@ def render_html(briefs: list[PartnerBrief], *, title: str) -> str:
         lis = "".join(
             (
                 "<li>"
-                f"<span class=\"pill\">{_esc(bl.category or 'Other')}</span>"
+                f"<span class=\"pill {_cat_class(_norm_cat(bl.category))}\">{_esc(_norm_cat(bl.category))}</span>"
                 f"<span class=\"pill pill-quiet\">{_esc(bl.region or 'Unknown')}</span>"
                 f"<span class=\"pill pill-quiet\">{_esc(bl.date or '')}</span>"
                 + (
@@ -253,20 +324,22 @@ def render_html(briefs: list[PartnerBrief], *, title: str) -> str:
             rows.append(
                 "<tr>"
                 f"<td>{_esc(b.partner)}</td>"
-                "<td colspan=\"4\" class=\"muted\">No updates.</td>"
+                f"<td colspan=\"5\" class=\"muted\">No updates. {_esc(_no_news_joke(b.partner))}</td>"
                 "</tr>"
             )
             continue
 
         for bl in b.bullets:
+            cat = _norm_cat(bl.category)
+            cat_badge = f"<span class=\"pill {_cat_class(cat)}\">{_esc(cat)}</span>"
             if "No significant updates found" in (bl.summary or "") and not bl.source_url:
                 rows.append(
                     "<tr>"
                     f"<td>{_esc(b.partner)}</td>"
-                    f"<td>{_esc(bl.category or 'Other')}</td>"
+                    f"<td>{cat_badge}</td>"
                     f"<td>{_esc(bl.region or 'Unknown')}</td>"
                     f"<td>{_esc(bl.date or '')}</td>"
-                    f"<td colspan=\"2\" class=\"muted\">{_esc(bl.summary)}</td>"
+                    f"<td colspan=\"2\" class=\"muted\">{_esc(bl.summary)} {_esc(_no_news_joke(b.partner))}</td>"
                     "</tr>"
                 )
                 continue
@@ -280,7 +353,7 @@ def render_html(briefs: list[PartnerBrief], *, title: str) -> str:
             rows.append(
                 "<tr>"
                 f"<td>{_esc(b.partner)}</td>"
-                f"<td>{_esc(bl.category or 'Other')}</td>"
+                f"<td>{cat_badge}</td>"
                 f"<td>{_esc(bl.region or 'Unknown')}</td>"
                 f"<td class=\"mono\">{_esc(bl.date or '')}</td>"
                 f"<td>{item_html}</td>"
@@ -345,8 +418,16 @@ def render_html(briefs: list[PartnerBrief], *, title: str) -> str:
       .muted {{ color: var(--muted); }}
       .highlights {{ margin: 10px 0 0 18px; padding: 0; font-size: 13px; line-height: 1.45; }}
       .highlights li {{ margin: 6px 0; }}
-      .pill {{ display:inline-block; padding: 2px 8px; border-radius: 999px; background: var(--pill); color: var(--pillText); font-size: 11px; margin-right: 6px; vertical-align: 1px; }}
+      .pill {{ display:inline-block; padding: 2px 8px; border-radius: 999px; background: var(--pill); color: var(--pillText); font-size: 11px; margin-right: 6px; vertical-align: 1px; white-space: nowrap; }}
       .pill-quiet {{ background: #f3f4f6; color: #374151; }}
+      .cat-newjoiners {{ background:#ecfeff; color:#155e75; }}
+      .cat-acquisitions {{ background:#fff7ed; color:#9a3412; }}
+      .cat-product {{ background:#eef2ff; color:#3730a3; }}
+      .cat-financial {{ background:#ecfdf5; color:#065f46; }}
+      .cat-strategy {{ background:#fef2f2; color:#991b1b; }}
+      .cat-partnership {{ background:#f5f3ff; color:#5b21b6; }}
+      .cat-wins {{ background:#fffbeb; color:#92400e; }}
+      .cat-other {{ background:#f3f4f6; color:#374151; }}
       .item {{ margin-left: 2px; }}
       .table-wrap {{ margin-top: 10px; overflow:auto; border: 1px solid var(--border); border-radius: 12px; }}
       table {{ border-collapse: collapse; width: 100%; min-width: 980px; font-size: 12px; }}
