@@ -113,12 +113,17 @@ def _http_post_json(
 
 def _base_format(partner: str) -> str:
     return (
-        f"Return EXACTLY this bullet format (no extra text, no markdown headers):\n"
+        f"OUTPUT RULES — READ CAREFULLY:\n"
+        f"- Return ONLY actual news items or events you found. Do NOT describe your search process, suggest search strategies, list platforms you would check, or explain what you could not find.\n"
+        f"- Every bullet MUST describe a real, specific event that happened (a company went live, a client was announced, a bug was reported, a person joined). If you cannot find a real event with a real source URL, do not include a bullet for it.\n"
+        f"- Do NOT include bullets like 'Reddit's search filters', 'G2/Capterra review filters', 'IFTTT rules', 'RSS feeds', 'Google Alerts', 'status page checks', or any bullet that describes a monitoring method rather than an actual event.\n"
+        f"- Do NOT include bullets where the summary is a search recommendation, a methodology tip, or a platform description.\n\n"
+        f"FORMAT — use EXACTLY this for each real item found:\n"
         f"Partner: {partner}\n"
-        f"- [Category] (Region, YYYY-MM-DD) Bullet summary. Source: <url>\n\n"
+        f"- [Category] (Region, YYYY-MM-DD) One sentence describing the specific event. Source: <direct_url_to_source>\n\n"
         f"Category must be one of: {' | '.join(ALL_CATEGORIES)}\n"
-        f"Region must be one of: {' | '.join(REGIONS)}\n"
-        f"If nothing found, return:\n"
+        f"Region must be one of: {' | '.join(REGIONS)}\n\n"
+        f"If you found NO real items with verifiable sources in the last 7 days, return ONLY:\n"
         f"Partner: {partner}\n"
         f"- No significant updates found in the last 7 days.\n"
     )
@@ -147,25 +152,28 @@ def build_prompt_standard(partner: str) -> str:
 def build_prompt_issues(partner: str) -> str:
     """Client-issue / complaint signals from Reddit, user groups, forums."""
     return (
-        "You are a support-intelligence analyst scanning public forums for product issues.\n\n"
-        f"Partner / vendor: {partner}\n"
-        "Time window: last 7 days only.\n"
-        "Audience: partnership manager who needs to know if clients are experiencing problems.\n\n"
-        "Search Reddit (r/recruiting, r/humanresources, r/HRIS, r/ATS, r/WorkdayCommunity, etc.), "
-        "vendor community forums, G2/Capterra reviews posted in the last 7 days, Trustpilot, and "
-        "any public user groups for complaints, outages, or reported bugs related to this vendor.\n\n"
-        "Focus areas (flag explicitly when relevant):\n"
-        "- Career site / career site builder outages or bugs\n"
-        "- Candidate Relationship Management (CRM) issues\n"
-        "- Screening & scheduling failures\n"
-        "- Hiring events platform problems\n"
-        "- Programmatic adtech / job distribution errors\n"
-        "- Employee referral module bugs\n"
-        "- API / integration breakages affecting partner ecosystems\n\n"
-        "For each issue: try to identify the affected client/company from context clues (username, post text, job title). "
-        "If identifiable, include it in the summary as '(Client: CompanyName)'. If not, write '(Client: unknown)'.\n"
-        "Severity hint: note if the thread has many upvotes/replies (indicates widespread impact).\n\n"
-        "Use category ClientIssue for all items. Include 1–5 items maximum.\n\n"
+        "You are a support-intelligence analyst. Your job is to report ONLY real complaints, bugs, or outages "
+        "that were posted publicly in the last 7 days. Do NOT describe your search methodology. Do NOT suggest "
+        "how someone could search. Only report things that actually happened.\n\n"
+        f"Vendor: {partner}\n"
+        "Time window: last 7 days only. If a post is older, exclude it entirely.\n\n"
+        "WHERE TO LOOK (do not list these as bullets — only report what you actually find there):\n"
+        "- Reddit: r/recruiting, r/humanresources, r/HRIS, r/ATS, r/WorkdayCommunity, r/sap\n"
+        "- G2 and Capterra reviews with a date in the last 7 days\n"
+        "- Trustpilot reviews dated in the last 7 days\n"
+        f"- {partner} community forums and user groups\n"
+        "- Public LinkedIn posts from HR/TA professionals reporting a bug or outage\n\n"
+        "WHAT TO REPORT — only include a bullet if:\n"
+        "  a) A specific person/company posted a complaint, bug report, or outage notice, AND\n"
+        "  b) You have a direct URL to the post or review\n\n"
+        "Focus areas (call out explicitly in the summary when relevant):\n"
+        "  career site outage | CRM bug | screening/scheduling failure | hiring events issue | "
+        "programmatic adtech error | employee referral bug | API/integration breakage\n\n"
+        "For each real issue found:\n"
+        "  - Try to name the affected company from context clues. Write '(Client: CompanyName)' or '(Client: unknown)'.\n"
+        "  - Note if the thread has 10+ upvotes or replies — write '(high volume)' to flag widespread impact.\n\n"
+        "CRITICAL: If you did not find any real, dated, sourced complaints — return the no-updates line. "
+        "Do NOT invent bullets. Do NOT describe how you would search.\n\n"
         + _base_format(partner)
     )
 
@@ -173,20 +181,33 @@ def build_prompt_issues(partner: str) -> str:
 def build_prompt_golive(partner: str) -> str:
     """GoLive announcements from LinkedIn / user communities."""
     return (
-        "You are scanning LinkedIn and HR tech user communities for go-live announcements.\n\n"
-        f"Vendor platform: {partner}\n"
-        "Time window: last 7 days only.\n"
-        "Audience: partnership manager tracking adoption momentum.\n\n"
-        "Search LinkedIn (public posts), vendor user groups (e.g. Workday Community, SAP SuccessFactors Community, "
-        "SmartRecruiters Community, iCIMS Connect), and HR tech forums for posts where a company announces "
-        "they have gone live / launched / implemented this vendor's platform.\n\n"
-        "Signals to look for:\n"
-        "- 'We just went live on [vendor]'\n"
-        "- 'Excited to announce our [vendor] implementation is complete'\n"
-        "- '#GoLive' or '#Implementation' tags mentioning the vendor\n"
-        "- User group posts sharing go-live milestones\n\n"
-        "For each GoLive: include the company that went live, what module/product if mentioned, and the region.\n"
-        "Use category GoLive for all items. Include 1–4 items maximum.\n\n"
+        "You are scanning public LinkedIn posts and HR tech community forums for go-live announcements. "
+        "Report ONLY real posts you found. Do NOT describe search strategies or suggest how someone could monitor this.\n\n"
+        f"Platform: {partner}\n"
+        "Time window: last 7 days only.\n\n"
+        "WHAT TO LOOK FOR on LinkedIn (search these exact phrases in quotes):\n"
+        f'  - "went live" "{partner}"\n'
+        f'  - "go live" "{partner}"\n'
+        f'  - "go-live" "{partner}"\n'
+        f'  - "excited to announce" "{partner}" implementation\n'
+        f'  - "proud to share" "{partner}" launch\n'
+        f'  - "officially launched" "{partner}"\n'
+        f'  - "#GoLive" "{partner}"\n'
+        f'  - "implementation complete" "{partner}"\n'
+        f'  - "now live on" "{partner}"\n'
+        f'  - "rolling out" "{partner}"\n\n'
+        "ALSO CHECK:\n"
+        f"  - {partner} official LinkedIn company page (recent posts tagging customer go-lives)\n"
+        f"  - {partner} user community / customer success posts\n"
+        "  - HR tech blogs like HR Executive, SHRM, Recruiting Daily (implementation announcements)\n\n"
+        "For each real go-live post found:\n"
+        "  - Name the company that went live (required — if no company name is visible, skip this bullet)\n"
+        "  - Mention the specific module or product if stated (e.g. 'career site', 'ATS', 'CRM', 'onboarding')\n"
+        "  - Include the region (country or continent)\n"
+        "  - Include the direct URL to the LinkedIn post or announcement\n\n"
+        "CRITICAL: Only include a bullet if you have (1) a named company and (2) a real URL. "
+        "If the post exists but has no company name, skip it. "
+        "If you found nothing real, return the no-updates line — do NOT fabricate.\n\n"
         + _base_format(partner)
     )
 
@@ -241,6 +262,46 @@ _BULLET_RE = re.compile(
     r"^\s*-\s*\[(?P<cat>[^\]]+)\]\s*\(\s*(?P<region>[^,\)]+)\s*,\s*(?P<date>\d{4}-\d{2}-\d{2})\s*\)\s*(?P<summary>.*?)\s*Source:\s*(?P<url>\S+)\s*$"
 )
 
+# Phrases that indicate Perplexity returned methodology/search-tips instead of real news.
+# Any bullet whose summary matches one of these fragments gets dropped silently.
+_METHODOLOGY_FRAGMENTS = [
+    "reddit's search",
+    "filter by subreddit",
+    "date range",
+    "g2/capterra",
+    "review filter",
+    "trustpilot's date",
+    "ifttt",
+    "zapier rule",
+    "rss feed",
+    "google alert",
+    "status page",
+    "official support",
+    "official community channel",
+    "search linkedin for recent complaint",
+    "monitoring template",
+    "search quer",
+    "suggest search",
+    "report framework",
+    "create a report",
+    "draft a monitoring",
+    "check smartrecruiters",
+    "review their official",
+    "community forum",           # generic — "SmartRecruiters' official community forums"
+    "vendor communit",
+    "how to monitor",
+    "you can also",
+    "to find these",
+    "one way to",
+    "another approach",
+    "alternative method",
+]
+
+
+def _is_methodology_leak(summary: str) -> bool:
+    low = (summary or "").lower()
+    return any(frag in low for frag in _METHODOLOGY_FRAGMENTS)
+
 
 def _parse_bullets(text: str) -> list[Bullet]:
     bullets: list[Bullet] = []
@@ -263,16 +324,23 @@ def _parse_bullets(text: str) -> list[Bullet]:
 
         m = _BULLET_RE.match(line)
         if not m:
-            bullets.append(
-                Bullet(
-                    category="Other",
-                    region="Unknown",
-                    date="",
-                    summary=line.strip().lstrip("-").strip(),
-                    source_url="",
-                    raw=line.strip(),
-                )
-            )
+            # Unstructured line — only keep if it looks like real content (has a URL)
+            # and is not a methodology suggestion
+            raw_text = line.strip().lstrip("-").strip()
+            if _is_methodology_leak(raw_text):
+                continue  # silently drop
+            # No URL → drop rather than show garbage
+            continue
+
+        summary = m.group("summary").strip().rstrip(".")
+        url = m.group("url").strip().rstrip(").,")
+
+        # Drop methodology leaks regardless of formatting
+        if _is_methodology_leak(summary):
+            continue
+
+        # Drop bullets with no real URL (placeholder text, not a real source)
+        if not url.startswith("http"):
             continue
 
         bullets.append(
@@ -280,8 +348,8 @@ def _parse_bullets(text: str) -> list[Bullet]:
                 category=m.group("cat").strip(),
                 region=m.group("region").strip(),
                 date=m.group("date").strip(),
-                summary=m.group("summary").strip().rstrip("."),
-                source_url=m.group("url").strip().rstrip(").,"),
+                summary=summary,
+                source_url=url,
                 raw=line.strip(),
             )
         )
